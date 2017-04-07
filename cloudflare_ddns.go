@@ -25,7 +25,7 @@ type tomlConfig struct {
 	GlobalApiKey     string
 	Email            string
 	Domain           string
-	TargetDomainList string
+	TargetDomainList []string
 }
 
 func loadConfig(filename string) tomlConfig {
