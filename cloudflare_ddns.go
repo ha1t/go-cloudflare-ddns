@@ -22,9 +22,10 @@ type Record struct {
 }
 
 type tomlConfig struct {
-	GlobalApiKey string
-	Email        string
-	Domain       string
+	GlobalApiKey     string
+	Email            string
+	Domain           string
+	TargetDomainList string
 }
 
 func loadConfig(filename string) tomlConfig {
@@ -69,6 +70,11 @@ func (record *Record) Update(after_ip_addr string) bool {
 
 func main() {
 
+	if len(os.Args) != 2 {
+		fmt.Println("configファイルが指定されていないか引数の指定が間違っています")
+		os.Exit(1)
+	}
+
 	ip_addr := get_ip()
 
 	// 取得したIPアドレスが前回と同じなら何もしない
@@ -78,15 +84,17 @@ func main() {
 
 	push_log(ip_addr)
 
-	config := loadConfig("config.toml")
+	config := loadConfig(os.Args[1])
 	url := "https://www.cloudflare.com/api_json.html?a=rec_load_all&tkn=" + config.GlobalApiKey + "&email=" + config.Email + "&z=" + config.Domain
 
 	records := get_dnslist(url)
 
 	for _, record := range records {
-		if record.Name == "direct.earth.project-p.jp" {
-			fmt.Printf("%v", record)
-			record.Update(ip_addr)
+		for _, target_domain := range config.TargetDomainList {
+			if record.Name == target_domain {
+				fmt.Printf("%v", record)
+				record.Update(ip_addr)
+			}
 		}
 	}
 }

@@ -2,3 +2,4 @@
 GlobalApiKey = "exampleexampleexampleexample"
 Email = "example@example.com"
 Domain = "example.com"
+TargetDomainList = ["hoge.example.com", "moge.example.com"]
