@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -26,6 +28,8 @@ type tomlConfig struct {
 	Email            string
 	Domain           string
 	TargetDomainList []string
+	UseLineNotify    bool
+	LineNotifyToken  string
 }
 
 func loadConfig(filename string) tomlConfig {
@@ -62,8 +66,15 @@ func (record *Record) Update(after_ip_addr string) bool {
 	url += "&z=" + config.Domain + "&type=A&name=" + record.DisplayName + "&content=" + record.Ip_addr + "&service_mode=" + record.ServiceMode + "&ttl=1"
 
 	result := php.File_get_contents(url)
+	_ = result
 
-	fmt.Printf("%v", result)
+	// fmt.Printf("%v", result)
+	if config.UseLineNotify {
+		err := notifyLine(config.LineNotifyToken, "update:"+record.DisplayName)
+		if err != nil {
+			fmt.Printf("%s", err)
+		}
+	}
 
 	return true
 }
@@ -79,7 +90,7 @@ func main() {
 
 	// 取得したIPアドレスが前回と同じなら何もしない
 	if ip_addr == pop_log() {
-		//os.Exit(0)
+		os.Exit(0)
 	}
 
 	push_log(ip_addr)
@@ -151,4 +162,30 @@ func pop_log() string {
 func push_log(ip_addr string) {
 	filename := "ip_addr.log"
 	php.File_put_contents(filename, ip_addr)
+}
+
+func notifyLine(token string, message string) error {
+	api_url := "https://notify-api.line.me/api/notify"
+
+	values := url.Values{}
+	values.Add("message", message)
+
+	req, err := http.NewRequest("POST", api_url, strings.NewReader(values.Encode()))
+	if err != nil {
+		return err
+	}
+
+	// Content-Type 設定
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	return err
 }
