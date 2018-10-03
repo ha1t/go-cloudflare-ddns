@@ -1,27 +1,18 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 
+	"github.com/cloudflare/cloudflare-go"
 	"github.com/ha1t/go-php-function"
-	"github.com/mattn/go-jsonpointer"
 	"github.com/naoina/toml"
 )
-
-// URLで使うから全部string
-type Record struct {
-	RecId       string
-	Name        string
-	DisplayName string
-	Ip_addr     string
-	ServiceMode string
-}
 
 type tomlConfig struct {
 	GlobalApiKey     string
@@ -53,32 +44,6 @@ func loadConfig(filename string) tomlConfig {
 	return config
 }
 
-func (record *Record) Update(after_ip_addr string) bool {
-
-	record.Ip_addr = after_ip_addr
-
-	config := loadConfig("config.toml")
-
-	url := "https://www.cloudflare.com/api_json.html?a=rec_edit&"
-	url += "tkn=" + config.GlobalApiKey
-	url += "&id=" + record.RecId
-	url += "&email=" + config.Email
-	url += "&z=" + config.Domain + "&type=A&name=" + record.DisplayName + "&content=" + record.Ip_addr + "&service_mode=" + record.ServiceMode + "&ttl=1"
-
-	result := php.File_get_contents(url)
-	_ = result
-
-	// fmt.Printf("%v", result)
-	if config.UseLineNotify {
-		err := notifyLine(config.LineNotifyToken, "update:"+record.DisplayName)
-		if err != nil {
-			fmt.Printf("%s", err)
-		}
-	}
-
-	return true
-}
-
 func main() {
 
 	if len(os.Args) != 2 {
@@ -93,57 +58,49 @@ func main() {
 		os.Exit(0)
 	}
 
-	push_log(ip_addr)
-
 	config := loadConfig(os.Args[1])
-	url := "https://www.cloudflare.com/api_json.html?a=rec_load_all&tkn=" + config.GlobalApiKey + "&email=" + config.Email + "&z=" + config.Domain
 
-	records := get_dnslist(url)
+	// Construct a new API object
+	api, err := cloudflare.New(config.GlobalApiKey, config.Email)
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	// Fetch the zone ID
+	zoneID, err := api.ZoneIDByName(config.Domain) // Assuming example.com exists in your Cloudflare account already
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Fetch all DNS records for example.org
+	records, err := api.DNSRecords(zoneID, cloudflare.DNSRecord{})
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	// r.Content が IP
 	for _, record := range records {
 		for _, target_domain := range config.TargetDomainList {
 			if record.Name == target_domain {
-				fmt.Printf("%v", record)
-				record.Update(ip_addr)
+				record.Content = ip_addr
+				api.UpdateDNSRecord(record.ZoneID, record.ID, record)
+				if err != nil {
+					log.Fatal(err)
+					return
+				}
+				if config.UseLineNotify {
+					err := notifyLine(config.LineNotifyToken, "update:"+record.Name)
+					if err != nil {
+						fmt.Printf("%s", err)
+					}
+				}
 			}
 		}
 	}
-}
 
-func get_dnslist(url string) []Record {
-	test_json := php.File_get_contents(url)
-	//fmt.Printf("%s", test_json)
-
-	var obj interface{}
-	json.Unmarshal([]byte(test_json), &obj)
-	result, _ := jsonpointer.Get(obj, "/response/recs/objs")
-	//fmt.Printf("%v\n", len(result.([]interface{})))
-	//fmt.Printf("%v\n", result.([]interface{}))
-
-	var records []Record
-
-	for key, day := range result.([]interface{}) {
-		_ = key
-
-		if day == nil {
-			continue
-		}
-
-		if day.(map[string]interface{})["type"] != "A" {
-			continue
-		}
-
-		record := Record{}
-		record.RecId = day.(map[string]interface{})["rec_id"].(string)
-		record.Ip_addr = day.(map[string]interface{})["content"].(string)
-		record.Name = day.(map[string]interface{})["name"].(string)
-		record.ServiceMode = day.(map[string]interface{})["service_mode"].(string)
-		record.DisplayName = day.(map[string]interface{})["display_name"].(string)
-
-		records = append(records, record)
-	}
-
-	return records
+	// 全部成功してから書き込む
+	push_log(ip_addr)
 }
 
 func get_ip() string {
